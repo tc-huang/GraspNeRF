@@ -101,7 +101,7 @@ if __name__ == "__main__":
     parser.add_argument("---num-objects", type=int, default=5)
     parser.add_argument("---num-rounds", type=int, default=200)
     parser.add_argument("---seed", type=int, default=42)
-    parser.add_argument("---sim-gui", type=bool, default=False)
+    parser.add_argument("---sim-gui", type=bool, default=True)#False)
     parser.add_argument("---rviz", action="store_true")
     
     ###

@@ -119,3 +119,4 @@ output/
 ckpt/
 
 *.pth
+blender-2.93.3-linux-x64

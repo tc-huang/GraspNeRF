@@ -45,8 +45,8 @@ depth_thresh: 0.8
 use_dr_prediction: false
 
 # lr
-total_step: 500000
-val_interval: 5000
+total_step: 500 #000
+val_interval: 50 #00
 lr_type: exp_decay
 lr_cfg:
   lr_init: 1.0e-4
