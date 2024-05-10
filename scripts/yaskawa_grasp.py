@@ -8,19 +8,22 @@ import argparse
 from pathlib import Path
 
 import cv_bridge
-import franka_msgs.msg
+# import franka_msgs.msg
 import geometry_msgs.msg
 import numpy as np
 import rospy
 import sensor_msgs.msg
 
-from vgn import vis
-from vgn.experiments.clutter_removal import State
-from vgn.detection import VGN
-from vgn.perception import *
-from vgn.utils import ros_utils
-from vgn.utils.transform import Rotation, Transform
-from vgn.utils.panda_control import PandaCommander
+import sys
+sys.path.append('src')
+
+from gd import vis
+from gd.experiments.clutter_removal import State
+from gd.detection import VGN
+from gd.perception import *
+from gd.utils import ros_utils
+from gd.utils.transform import Rotation, Transform
+from gd.utils.panda_control import PandaCommander
 
 
 # tag lies on the table in the center of the workspace
@@ -32,15 +35,18 @@ class PandaGraspController(object):
     def __init__(self, args):
         self.robot_error = False
 
-        self.base_frame_id = rospy.get_param("~base_frame_id")
-        self.tool0_frame_id = rospy.get_param("~tool0_frame_id")
-        self.T_tool0_tcp = Transform.from_dict(rospy.get_param("~T_tool0_tcp"))  # TODO
-        self.T_tcp_tool0 = self.T_tool0_tcp.inverse()
-        self.finger_depth = rospy.get_param("~finger_depth")
-        self.size = 6.0 * self.finger_depth
-        self.scan_joints = rospy.get_param("~scan_joints")
-
-        self.setup_panda_control()
+        # self.base_frame_id = rospy.get_param("~base_frame_id")
+        # self.tool0_frame_id = rospy.get_param("~tool0_frame_id")
+        # self.T_tool0_tcp = Transform.from_dict(rospy.get_param("~T_tool0_tcp"))  # TODO
+        # self.T_tcp_tool0 = self.T_tool0_tcp.inverse()
+        # self.finger_depth = rospy.get_param("~finger_depth")
+        # self.size = 6.0 * self.finger_depth
+        # self.scan_joints = rospy.get_param("~scan_joints")
+        
+        self.finger_depth = 0.04 # gripper finger depth meter
+        self.size = 0.3 # workspace size in meter
+        
+        # self.setup_panda_control()
         self.tf_tree = ros_utils.TransformTree()
         self.define_workspace()
         self.create_planning_scene()
@@ -50,17 +56,17 @@ class PandaGraspController(object):
         rospy.loginfo("Ready to take action")
 
     def setup_panda_control(self):
-        rospy.Subscriber(
-            "/franka_state_controller/franka_states",
-            franka_msgs.msg.FrankaState,
-            self.robot_state_cb,
-            queue_size=1,
-        )
-        rospy.Subscriber(
-            "/joint_states", sensor_msgs.msg.JointState, self.joints_cb, queue_size=1
-        )
+        # rospy.Subscriber(
+        #     "/franka_state_controller/franka_states",
+        #     franka_msgs.msg.FrankaState,
+        #     self.robot_state_cb,
+        #     queue_size=1,
+        # )
+        # rospy.Subscriber(
+        #     "/joint_states", sensor_msgs.msg.JointState, self.joints_cb, queue_size=1
+        # )
         self.pc = PandaCommander()
-        self.pc.move_group.set_end_effector_link(self.tool0_frame_id)
+        # self.pc.move_group.set_end_effector_link(self.tool0_frame_id)
 
     def define_workspace(self):
         z_offset = -0.06
@@ -68,16 +74,16 @@ class PandaGraspController(object):
         T_tag_task = Transform(Rotation.identity(), t_tag_task)
         self.T_base_task = T_base_tag * T_tag_task
 
-        self.tf_tree.broadcast_static(self.T_base_task, self.base_frame_id, "task")
+        # self.tf_tree.broadcast_static(self.T_base_task, self.base_frame_id, "task")
         rospy.sleep(1.0)  # wait for the TF to be broadcasted
 
     def create_planning_scene(self):
         # collision box for table
         msg = geometry_msgs.msg.PoseStamped()
-        msg.header.frame_id = self.base_frame_id
+        # msg.header.frame_id = self.base_frame_id
         msg.pose = ros_utils.to_pose_msg(T_base_tag)
         msg.pose.position.z -= 0.01
-        self.pc.scene.add_box("table", msg, size=(0.6, 0.6, 0.02))
+        # self.pc.scene.add_box("table", msg, size=(0.6, 0.6, 0.02))
 
         rospy.sleep(1.0)  # wait for the scene to be updated
 
@@ -103,8 +109,9 @@ class PandaGraspController(object):
     def run(self):
         vis.clear()
         vis.draw_workspace(self.size)
-        self.pc.move_gripper(0.08)
-        self.pc.home()
+        # TODO: need implimentation
+        # self.pc.move_gripper(0.08)
+        # self.pc.home()
 
         tsdf, pc = self.acquire_tsdf()
         vis.draw_tsdf(tsdf.get_grid().squeeze(), tsdf.voxel_size)
@@ -124,7 +131,8 @@ class PandaGraspController(object):
         vis.draw_grasp(grasp, score, self.finger_depth)
         rospy.loginfo("Selected grasp")
 
-        self.pc.home()
+        # TODO: need implimentation
+        # self.pc.home()
         label = self.execute_grasp(grasp)
         rospy.loginfo("Grasp execution")
 
@@ -134,16 +142,19 @@ class PandaGraspController(object):
 
         if label:
             self.drop()
+        # TODO: need implimentation
         self.pc.home()
 
     def acquire_tsdf(self):
-        self.pc.goto_joints(self.scan_joints[0])
+        # TODO: need implimentation
+        #self.pc.goto_joints(self.scan_joints[0])
 
         self.tsdf_server.reset()
         self.tsdf_server.integrate = True
 
-        for joint_target in self.scan_joints[1:]:
-            self.pc.goto_joints(joint_target)
+        # TODO: need implimentation
+        # for joint_target in self.scan_joints[1:]:
+        #     self.pc.goto_joints(joint_target)
 
         self.tsdf_server.integrate = False
         tsdf = self.tsdf_server.low_res_tsdf
@@ -211,11 +222,18 @@ class PandaGraspController(object):
 
 class TSDFServer(object):
     def __init__(self):
-        self.cam_frame_id = rospy.get_param("~cam/frame_id")
-        self.cam_topic_name = rospy.get_param("~cam/topic_name")
-        self.intrinsic = CameraIntrinsic.from_dict(rospy.get_param("~cam/intrinsic"))
-        self.size = 6.0 * rospy.get_param("~finger_depth")
-
+        # self.cam_frame_id = rospy.get_param("~cam/frame_id")
+        # self.cam_topic_name = rospy.get_param("~cam/topic_name")
+        self.cam_frame_id = "camera_depth_optical_frame"
+        self.cam_topic_name = "/camera/depth/image_rect_raw"
+        
+        # TODO: need check
+        # self.intrinsic = CameraIntrinsic.from_dict(rospy.get_param("~cam/intrinsic"))
+        self.intrinsic = CameraIntrinsic(640, 480, 606.77737126, 606.70030146, 321.63287183, 236.95293136)
+        # TODO: need check
+        #self.size = 6.0 * rospy.get_param("~finger_depth")
+        self.size = 30
+        
         self.cv_bridge = cv_bridge.CvBridge()
         self.tf_tree = ros_utils.TransformTree()
         self.integrate = False
@@ -237,6 +255,44 @@ class TSDFServer(object):
         self.low_res_tsdf.integrate(img, self.intrinsic, T_cam_task)
         self.high_res_tsdf.integrate(img, self.intrinsic, T_cam_task)
 
+class ArgumentParserForBlender(argparse.ArgumentParser):
+    """
+    This class is identical to its superclass, except for the parse_args
+    method (see docstring). It resolves the ambiguity generated when calling
+    Blender from the CLI with a python script, and both Blender and the script
+    have arguments. E.g., the following call will make Blender crash because
+    it will try to process the script's -a and -b flags:
+    >>> blender --python my_script.py -a 1 -b 2
+
+    To bypass this issue this class uses the fact that Blender will ignore all
+    arguments given after a double-dash ('--'). The approach is that all
+    arguments before '--' go to Blender, arguments after go to the script.
+    The following calls work fine:
+    >>> blender --python my_script.py -- -a 1 -b 2
+    >>> blender --python my_script.py --
+    """
+
+    def _get_argv_after_doubledash(self):
+        """
+        Given the sys.argv as a list of strings, this method returns the
+        sublist right after the '--' element (if present, otherwise returns
+        an empty list).
+        """
+        try:
+            idx = sys.argv.index("---")
+            return sys.argv[idx+1:] # the list after '--'
+        except ValueError as e: # '--' not in the list:
+            return []
+
+    # overrides superclass
+    def parse_args(self):
+        """
+        This method is expected to behave identically as in the superclass,
+        except that the sys.argv list will be pre-processed using
+        _get_argv_after_doubledash before. See the docstring of the class for
+        usage examples and details.
+        """
+        return super().parse_args(args=self._get_argv_after_doubledash())
 
 def main(args):
     rospy.init_node("panda_grasp")
@@ -244,10 +300,13 @@ def main(args):
 
     while True:
         panda_grasp.run()
+        break
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--model", type=Path, required=True)
+    # parser = argparse.ArgumentParser()
+    parser = ArgumentParserForBlender()
+    parser.add_argument("--model", type=Path, required=False, default='/catkin_ws/GraspNeRF/src/nr/ckpt/test/model_best.pth')
     args = parser.parse_args()
     main(args)
+    rospy.loginfo("End")
