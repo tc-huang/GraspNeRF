@@ -185,7 +185,7 @@ class GraspNeRFPlanner(object):
         nf = [max(0, np.min(depth)), min(self.depth_thres[self.tp], np.max(depth))]
         return np.array(nf)
     
-    def __call__(self, test_view_id, round_idx, n_grasp, gt_tsdf):
+    def __call__(self, test_view_id, round_idx, n_grasp):
         # load data for test
         images = [self.get_image(i, round_idx) for i in test_view_id]
         images = color_map_forward(np.stack(images, 0)).transpose([0, 3, 1, 2])

@@ -270,7 +270,7 @@ class NeuralRayRenderer(nn.Module):
         que_imgs_info = data['que_imgs_info'].copy()
         is_train = 'eval' not in data
         src_imgs_info = data['src_imgs_info'].copy() if 'src_imgs_info' in data else None
-
+        # TODO!
         # extract image feature
         ref_imgs_info['img_feats'] = self.image_encoder(ref_imgs_info['imgs'])
         # calc visibility feature map of each view from mvs
@@ -279,14 +279,14 @@ class NeuralRayRenderer(nn.Module):
         ref_imgs_info['ray_feats'] = self.vis_encoder(ref_imgs_info['ray_feats'], ref_imgs_info['img_feats'])
         
         render_outputs = {}
-        if self.cfg['render_rgb']:
-            render_outputs = self.render(que_imgs_info, ref_imgs_info, is_train)
+        # if self.cfg['render_rgb']:
+        #     render_outputs = self.render(que_imgs_info, ref_imgs_info, is_train)
 
         if self.cfg['sample_volume']:
             render_outputs['volume'] = self.sample_volume(ref_imgs_info)
 
-        if (self.cfg['use_depth_loss'] and 'true_depth' in ref_imgs_info) or (not is_train):
-            render_outputs.update(self.predict_mean_for_depth_loss(ref_imgs_info))
+        # if (self.cfg['use_depth_loss'] and 'true_depth' in ref_imgs_info) or (not is_train):
+        #     render_outputs.update(self.predict_mean_for_depth_loss(ref_imgs_info))
 
         return render_outputs
 

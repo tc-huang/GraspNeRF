@@ -222,6 +222,27 @@ class GraspNeRFPlanner(object):
         @rets
             volume, label, rot, width: np array of shape (1, 1, res, res, res)
         """
+        """"""
+        # import sys
+        # import numpy as np
+        # from PIL import Image
+        # print(f"images:{images.shape}, extrinsics:{extrinsics.shape}, intrinsics:{intrinsics.shape}")
+
+        # for i in range(len(images)):
+        #     # data = img.transpose(1, 2, 0)
+        #     cv2.imwrite(f'input_image_{i}.png', np.transpose(images[i].astype(np.uint8),(1,2,0)))
+
+        #     # 使用 PIL 创建图像
+        #     # image = Image.fromarray(data)
+
+        #     # 保存图像到文件
+        #     # image.save(f'output_image_{i}.jpg')
+        # print("image saved!!!!!!!!!!!!!!!!!!!!!!!!!!")
+        # print(f"extrinsics:{extrinsics}")
+        # print(f"intrinsics:{intrinsics}")
+        # sys.exit(0)
+        """"""
+
         _, _, h, w = images.shape
         assert h % 32 == 0 and w % 32 == 0
         extrinsics = extrinsics[:, :3, :]

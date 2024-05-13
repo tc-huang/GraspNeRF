@@ -120,3 +120,6 @@ ckpt/
 
 *.pth
 blender-2.93.3-linux-x64
+docker/blender-2.93.3
+src/robotic_drawing
+src/pysurroundcap

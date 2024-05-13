@@ -152,17 +152,17 @@ RUN conda install numpy==1.23.5 pandas scikit-image==0.19.3 h5py torchmetrics tq
 RUN pip3 install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu121
 RUN pip3 install open3d pybullet==2.7.9
 RUN conda install -c conda-forge quaternion
-RUN conda install conda-forge::easydict conda-forge::plyfile conda-forge::tensorboard conda-forge::quaternion
+RUN conda install conda-forge::easydict conda-forge::plyfile conda-forge::tensorboard conda-forge::quaternion conda-forge::pyserial
 # RUN conda uninstall opencv
 # RUN pip3 install opencv-python
 # RUN conda install -c conda-forge libgcc=5.2.0
 # RUN sudo apt-get install -y cmake gcc g++ python3-dev python3-numpy libgtk-3-dev libpng-dev libjpeg-dev libopenexr-dev libtiff-dev libwebp-dev
-RUN pip3 install opencv-python
+RUN pip3 install opencv-python opencv-contrib-python
+# RUN conda install -c conda-forge pyserial
 #==3.4.18.65
 # RUN conda install -c conda-forge libgcc=5.2.0
 # RUN conda install -c anaconda libstdcxx-ng
 # RUN conda install gcc scipy
-RUN sudo ln -s /opt/conda/envs/myenv /catkin_ws/blender-2.93.3/2.93/python
 # RUN echo "source /opt/ros/${ROS_DISTRO}/setup.bash" >> /home/${USERNAME}/.bashrc
 
 RUN sudo cp /opt/conda/envs/myenv/lib/libstdc++.so.6.0.29 /usr/lib/x86_64-linux-gnu/
@@ -172,5 +172,8 @@ RUN sudo ln -s /usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.29 /usr/lib/x86_64-lin
 RUN sudo echo "deb http://th.archive.ubuntu.com/ubuntu jammy main" >> /etc/apt/sources.list
 RUN apt-get update && apt-get install -y libc6
 
+RUN pip install rospkg
 # ENV LD_LIBRARY_PATH /opt/conda/envs/myenv/lib:$LD_LIBRARY_PATH
+COPY docker/blender-2.93.3 .
+RUN sudo ln -s /opt/conda/envs/myenv /catkin_ws/blender-2.93.3/2.93/python
 USER ${USERNAME}

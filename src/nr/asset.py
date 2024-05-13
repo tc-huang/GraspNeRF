@@ -1,7 +1,7 @@
 import os
 import numpy as np
 
-DATA_ROOT_DIR = '../../data/traindata_example/'
+DATA_ROOT_DIR = '/home/rl/Documents/JH/newGraspNeRF/GraspNeRF/data/traindata_example/'
 VGN_TRAIN_ROOT = DATA_ROOT_DIR + 'giga_hemisphere_train_demo'
 
 def add_scenes(root, type, filter_list=None):
@@ -42,6 +42,8 @@ import pandas as pd
 from pathlib import Path
 import time
 t0 = time.time()
+# '/home/rl/Documents/JH/newGraspNeRF/GraspNeRF/data/traindata_exampleGIGA_demo/data_packed_train_processed_dex_noise/grasps.csv'
+# '/home/rl/Documents/JH/newGraspNeRF/GraspNeRF/data/traindata_example/GIGA_demo/data_packed_train_processed_dex_noise/grasps.csv'
 VGN_PACK_TRAIN_CSV = pd.read_csv(Path(CSV_ROOT + '/data_packed_train_processed_dex_noise/grasps.csv'))
 VGN_PILE_TRAIN_CSV = pd.read_csv(Path(CSV_ROOT + '/data_pile_train_processed_dex_noise/grasps.csv'))
 print(f"finished loading csv in {time.time() - t0} s")

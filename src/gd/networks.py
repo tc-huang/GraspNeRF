@@ -5,12 +5,45 @@ import torch.nn as nn
 import torch.nn.functional as F
 from scipy import ndimage
 
+import sys
+sys.path.append('src/nr')
+from network.renderer import name2network
+import yaml
+
+
+
+with open("/catkin_ws/GraspNeRF/src/nr/configs/nrvgn_sdf.yaml") as stream:
+    try:
+        cfg = dict(yaml.safe_load(stream))
+        # print(cfg)
+        # print(yaml.safe_load(stream))
+    except yaml.YAMLError as exc:
+        print(exc)
+
+default_cfg={
+        "optimizer_type": 'adam',
+        "multi_gpus": False,
+        "lr_type": "exp_decay",
+        "lr_cfg":{
+            "lr_init": 1.0e-4,
+            "decay_step": 100000,
+            "decay_rate": 0.5,
+        },
+        "total_step": 300000,
+        "train_log_step": 20,
+        "val_interval": 10000,
+        "save_interval": 1000,
+        "worker_num": 8,
+        "fix_seed": False
+    }
 
 def get_network(name):
     models = {
         "conv": ConvNet(),
+        # "best": name2network['grasp_nerf'](cfg).cuda()
     }
-    return models[name.lower()]
+    # return models[name.lower()]
+    return models['conv']
 
 
 def load_network(path, device):
@@ -22,7 +55,7 @@ def load_network(path, device):
     """
     model_name = path.stem.split("_")[1]
     net = get_network(model_name).to(device)
-    net.load_state_dict(torch.load(path, map_location=device))
+    # net.load_state_dict(torch.load(path, map_location=device))
     return net
 
 

@@ -144,11 +144,11 @@ class Trainer:
 
             log_info={}
             outputs=self.train_network(train_data)
+            break
             for loss in self.train_losses:
                 loss_results = loss(outputs,train_data,step)
                 for k,v in loss_results.items():
                     log_info[k]=v
-
             loss=0
             for k,v in log_info.items():
                 if k.startswith('loss'):

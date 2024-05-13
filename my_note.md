@@ -11,6 +11,8 @@ conda install conda-forge::plyfile
 conda install conda-forge::pyquaternion
 conda install conda-forge::tensorboard
 conda install -c conda-forge quaternion
+
+??pip install opencv-python transforms3d
 conda activate /home/rl/Documents/JH/newGraspNeRF/GraspNeRF/.conda
 
 # build python blender bpy
@@ -40,3 +42,13 @@ sudo docker compose -f docker/docker-compose-gui-nvidia.yml up
 sudo docker exec -it ros_docker /bin/bash
 roscore
 rosrun rviz rviz
+roslaunch realsense2_camera rs_camera.launch
+
+# Start Realsense ROS node
+roslaunch realsense2_camera rs_camera.launch
+
+# Knowning Errors
+Error response from daemon: failed to create task for container: failed to create shim task: OCI runtime create failed: runc create failed: unable to start container process: error during container init: error running hook #0: error running hook: exit status 1, stdout: , stderr: Auto-detected mode as 'legacy'
+nvidia-container-cli: initialization error: load library failed: libnvidia-ml.so.1: cannot open shared object file: no such file or directory: unknown
+> sudo apt-get remove docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin 
+> sudo apt-get install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin 
