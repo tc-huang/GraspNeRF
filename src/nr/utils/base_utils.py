@@ -2,7 +2,7 @@ import math
 import os
 
 import cv2
-import h5py
+# import h5py
 import torch
 
 import numpy as np
@@ -13,8 +13,8 @@ from plyfile import PlyData
 from skimage.io import imread
 
 #######################io#########################################
-from transforms3d.axangles import mat2axangle
-from transforms3d.euler import euler2mat
+# from transforms3d.axangles import mat2axangle
+# from transforms3d.euler import euler2mat
 
 
 def read_pickle(pkl_path):

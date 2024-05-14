@@ -150,7 +150,7 @@ ENV PATH /opt/conda/envs/myenv/bin:$PATH
 SHELL ["conda", "run", "-n", "myenv", "/bin/bash", "-c"]
 RUN conda install numpy==1.23.5 pandas scikit-image==0.19.3 h5py torchmetrics tqdm yaml
 RUN pip3 install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu121
-RUN pip3 install open3d pybullet==2.7.9
+RUN pip3 install open3d pybullet==2.7.9 transform3d
 RUN conda install -c conda-forge quaternion
 RUN conda install conda-forge::easydict conda-forge::plyfile conda-forge::tensorboard conda-forge::quaternion conda-forge::pyserial
 # RUN conda uninstall opencv

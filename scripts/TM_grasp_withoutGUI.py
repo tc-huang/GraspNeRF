@@ -249,7 +249,7 @@ class PandaGraspController():
         ###
 
     def acquire_tsdf(self): #移動去其他視角拍照
-        fr = open("./scripts/PosSet.txt", 'r+')  #這時還沒有抓取joint的function所以使用position當作點位
+        # fr = open("./scripts/PosSet.txt", 'r+')  #這時還沒有抓取joint的function所以使用position當作點位
         
         #print(Total_pose)
         # print(j)

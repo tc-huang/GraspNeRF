@@ -41,7 +41,7 @@ sudo docker compose -f docker/docker-compose-gui-nvidia.yml build
 sudo docker compose -f docker/docker-compose-gui-nvidia.yml up
 sudo docker exec -it ros_docker /bin/bash
 roscore
-rosrun rviz rviz -d config/panda_grasp.rviz
+rosrun rviz rviz -d config/my_grasp.rviz
 roslaunch realsense2_camera rs_camera.launch depth_width:=640 depth_height:=480 depth_fps:=30
 
 # Start Realsense ROS node

@@ -4,6 +4,9 @@
 Open-loop grasp execution using a Panda arm and wrist-mounted RealSense camera.
 """
 
+FAKE = False
+
+import os
 import argparse
 from pathlib import Path
 
@@ -24,8 +27,9 @@ from gd.perception import *
 from gd.utils import ros_utils
 from gd.utils.transform import Rotation, Transform
 from gd.utils.panda_control import PandaCommander
+from gd.grasp import *
 
-# from nr.main import GraspNeRFPlanner
+from nr.main import GraspNeRFPlanner
 
 import cv2
 
@@ -33,6 +37,7 @@ from pysurroundcap.util import *
 from pysurroundcap.data_struct import LevelPosesConfig
 from pysurroundcap.pose import create_poses
 
+from scipy import ndimage
 
 # tag lies on the table in the center of the workspace
 T_base_tag = Transform(Rotation.identity(), [0.42, 0.02, 0.21])
@@ -55,8 +60,10 @@ ARUCO_MARK_LENGTH = 30
 WORKSPACE_SIZE_MM = 200
 
 class PandaGraspController(object):
-    def __init__(self, args):
+    def __init__(self, args, round_idx, gpuid, render_frame_list):
         self.robot_error = False
+        self.args = args
+        self.round_idx, self.gpuid, self.render_frame_list = round_idx, gpuid, render_frame_list
 
         # self.base_frame_id = rospy.get_param("~base_frame_id")
         # self.tool0_frame_id = rospy.get_param("~tool0_frame_id")
@@ -76,9 +83,13 @@ class PandaGraspController(object):
         self.define_workspace()
         self.create_planning_scene()
         self.tsdf_server = TSDFServer()
-        self.plan_grasps = VGN(args.model, rviz=True)
+        # self.plan_grasps = VGN(args.model, rviz=True)
         
-        # self.grasp_planner = GraspNeRFPlanner(args)
+        self.grasp_plan_fn = GraspNeRFPlanner(args)
+
+        self.images = []
+        self.extrinsics = []
+        self.intrinsics = []
 
         rospy.loginfo("Ready to take action")
 
@@ -132,6 +143,68 @@ class PandaGraspController(object):
         self.pc.recover()
         self.robot_error = False
         rospy.loginfo("Recovered from robot error")
+    
+    def __process(
+        self,
+        tsdf_vol,
+        qual_vol,
+        rot_vol,
+        width_vol,
+        gaussian_filter_sigma=1.0,
+        min_width=1.33,
+        max_width=9.33,
+        tsdf_thres_high = 0.5,
+        tsdf_thres_low = 1e-3,
+        n_grasp=0
+    ):
+        tsdf_vol = tsdf_vol.squeeze()  
+        qual_vol = qual_vol.squeeze()  
+        rot_vol = rot_vol.squeeze()  
+        width_vol = width_vol.squeeze()
+        # smooth quality volume with a Gaussian
+        qual_vol = ndimage.gaussian_filter(
+            qual_vol, sigma=gaussian_filter_sigma, mode="nearest"
+        )
+
+        # mask out voxels too far away from the surface
+        outside_voxels = tsdf_vol > tsdf_thres_high
+        inside_voxels = np.logical_and(tsdf_thres_low < tsdf_vol, tsdf_vol < tsdf_thres_high)
+        valid_voxels = ndimage.morphology.binary_dilation(
+            outside_voxels, iterations=2, mask=np.logical_not(inside_voxels)
+        )
+        qual_vol[valid_voxels == False] = 0.0
+        
+        # reject voxels with predicted widths that are too small or too large
+        qual_vol[np.logical_or(width_vol < min_width, width_vol > max_width)] = 0.0
+
+        return qual_vol, rot_vol, width_vol
+    
+    def __select(self, qual_vol, rot_vol, width_vol, threshold=0.90, max_filter_size=4):
+        qual_vol[qual_vol < threshold] = 0.0
+
+        # non maximum suppression
+        max_vol = ndimage.maximum_filter(qual_vol, size=max_filter_size)
+        
+        qual_vol = np.where(qual_vol == max_vol, qual_vol, 0.0)
+        mask = np.where(qual_vol, 1.0, 0.0)
+
+        # construct grasps
+        grasps, scores, indexs = [], [], []
+        for index in np.argwhere(mask):
+            indexs.append(index)
+            grasp, score = self.__select_index(qual_vol, rot_vol, width_vol, index)
+            grasps.append(grasp)
+            scores.append(score)
+        return grasps, scores, indexs
+    
+    def __select_index(self, qual_vol, rot_vol, width_vol, index):
+        i, j, k = index
+        score = qual_vol[i, j, k]
+        rot = rot_vol[:, i, j, k]
+        ori = Rotation.from_quat(rot)
+        pos = np.array([i, j, k], dtype=np.float64)
+        width = width_vol[i, j, k]
+        return Grasp(Transform(ori, pos), width), score
 
     def run(self):
         vis.clear()
@@ -152,11 +225,55 @@ class PandaGraspController(object):
         state = State(tsdf, pc)
         
         # TODO: JH need to check 
-        grasps, scores, planning_time = self.plan_grasps(state)
-        # timings = {}
-        # n_grasp = 0
-        # grasps, scores, timings["planning"] = grasp_plan_fn(render_frame_list, round_idx, n_grasp, gt_tsdf)
+        # grasps, scores, planning_time = self.plan_grasps(state)
+        timings = {}
+        n_grasp = 0
+        round_idx = 0 #int(argv[0])
+        gt_tsdf = np.ones((1, 40, 40, 40))
+        render_frame_list = []#=[int(frame_id) for frame_id in str(argv[10]).replace(' ','').split(",")]
+
+        # grasps, scores, timings["planning"] = self.grasp_plan_fn(render_frame_list, round_idx, n_grasp, gt_tsdf)
+        """
+        images: np array of shape (3, 3, h, w), image in RGB format
+        extrinsics: np array of shape (3, 4, 4), the transformation matrix from world to camera
+        intrinsics: np array of shape (3, 3, 3)
+        """
+        new_size = (480, 640) #(640, 480)
+        # images = np.array([cv2.resize(image, new_size, interpolation=cv2.INTER_AREA).permute((2, 0, 1)) for image in self.images])
+        images = np.array([cv2.resize(image, new_size, interpolation=cv2.INTER_AREA).transpose((2, 0, 1)) for image in self.images])
+        # extrinsics = np.array(self.Ttarget2cam_list)
+        l = [np.linalg.inv(Ttarget2cam) for Ttarget2cam in self.Ttarget2cam_list]
+        for Ttarget2cam in l:
+            Ttarget2cam[:3, 3] /= 1000.0
+        extrinsics = np.array(l)
+        intrinsics = np.array([intrinsic_matrix] * 6)
+        depth_range=np.array([[0.2, 0.8] for _ in range(6)])
+        print(f"images {images.shape}")
+        print(f"extrinsics {extrinsics.shape}")
+        print(f"intrinsics {intrinsics.shape}")
+        print(f"depth_range {depth_range.shape}")
+
+        tsdf_vol, qual_vol_ori, rot_vol_ori, width_vol_ori, toc = self.grasp_plan_fn.core(images, extrinsics, intrinsics, depth_range=depth_range)
+        rospy.loginfo(f"[TSDF] draw TSDF2")
+        vis.draw_tsdf(tsdf_vol, tsdf.voxel_size)
+        self.tsdf_thres_high = 0 
+        self.tsdf_thres_low = -0.85
+        ngrasp = 0
+        qual_vol, rot_vol, width_vol = self.__process(tsdf_vol, qual_vol_ori, rot_vol_ori, width_vol_ori, tsdf_thres_high=self.tsdf_thres_high, tsdf_thres_low=self.tsdf_thres_low, n_grasp=n_grasp)
+        grasps, scores, indexs = self.__select(qual_vol.copy(), rot_vol, width_vol)
+        grasps, scores, indexs = np.asarray(grasps), np.asarray(scores), np.asarray(indexs)
+
+        if len(grasps) > 0:
+            np.random.seed(self.args.seed + round_idx + n_grasp)
+            p = np.random.permutation(len(grasps))  
+            grasps = [from_voxel_coordinates(g, self.voxel_size) for g in grasps[p]]
+            scores = scores[p]
+            indexs = indexs[p]
         
+        
+        rospy.loginfo(f"[GraspNeRF] grasps: {grasps}")
+        rospy.loginfo(f"[GraspNeRF] scores: {scores}")
+
         vis.draw_grasps(grasps, scores, self.finger_depth)
         rospy.loginfo("Planned grasps")
 
@@ -203,10 +320,13 @@ class PandaGraspController(object):
   
     def __obtain_inition_coordinate_relation(self):
         self.pc.home()
-        tcp_pose = self.pc.get_pose()
-        tvec = tcp_pose[:3]
-        x_fix_angle, y_fix_angle, z_fix_angle = tcp_pose[3:]
-        T_gripper2base_init = xyzrpy_to_T(tvec[0], tvec[1], tvec[2], x_fix_angle, y_fix_angle, z_fix_angle)
+        if not FAKE:
+            tcp_pose = self.pc.get_pose()
+            tvec = tcp_pose[:3]
+            x_fix_angle, y_fix_angle, z_fix_angle = tcp_pose[3:]
+            T_gripper2base_init = xyzrpy_to_T(tvec[0], tvec[1], tvec[2], x_fix_angle, y_fix_angle, z_fix_angle)
+        else:
+            T_gripper2base_init = np.eye(4) 
         # print(f"T_gripper2base_init:\n {T_gripper2base_init}")
         
         self.tsdf_server.catch_image = True
@@ -218,9 +338,9 @@ class PandaGraspController(object):
         T_aruco2cam_init = tvec_rvec_to_T(tvec, rvec, use_degree=False)
         print(f"T_aruco2cam_init:\n {T_aruco2cam_init}")
         
-        cv2.imshow('image for aruco', aruco_detect_result)
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
+        # cv2.imshow('image for aruco', aruco_detect_result)
+        # cv2.waitKey(0)
+        # cv2.destroyAllWindows()
         
         return T_gripper2base_init, T_aruco2cam_init
     
@@ -255,7 +375,7 @@ class PandaGraspController(object):
         # print(f"camera_poses:\n {camera_poses}")
         ee_base_poses = self.__get_ee_base_poses(camera_poses, T_gripper2base_init, T_aruco2cam_init)
         # print(f"ee_base_pose:\n {ee_base_poses}")
-        Ttarget2cam_list = [self.__camera_pose_2_Ttarget2cam(camera_pose) for camera_pose in camera_poses]
+        self.Ttarget2cam_list = [self.__camera_pose_2_Ttarget2cam(camera_pose) for camera_pose in camera_poses]
         
         self.tsdf_server.T_cam_task = T_aruco2cam_init
 
@@ -263,18 +383,19 @@ class PandaGraspController(object):
         # self.pc.goto_joints(self.scan_joints[0])
         rospy.sleep(0.1) 
 
-        self.pc.goto_pose(ee_base_poses[0])
-        self.tsdf_server.T_cam_task = Ttarget2cam_list[0]
+        # self.pc.goto_pose(ee_base_poses[0])
+        # self.tsdf_server.T_cam_task = Ttarget2cam_list[0]
         # self.tsdf_server.T_cam_task = xyzrpy_to_T(camera_poses[0].x, camera_poses[0].y, camera_poses[0].z, camera_poses[0].rx_deg, camera_poses[0].ry_deg, camera_poses[0].rz_deg)
         
         
-        self.tsdf_server.catch_image = True
-        rospy.sleep(0.1)
-        cv2.imwrite('pose_0.jpg', self.tsdf_server.rgb_image)
+        # self.tsdf_server.catch_image = True
+        # rospy.sleep(0.1)
+        # self.images.append(self.tsdf_server.rgb_image)
+        # cv2.imwrite('pose_0.jpg', self.tsdf_server.rgb_image)
 
         # TODO: need to check
         self.tsdf_server.reset()
-        self.tsdf_server.integrate = True
+        # self.tsdf_server.integrate = True
         
         # depth_colormap = cv2.applyColorMap(cv2.convertScaleAbs(self.tsdf_server.depth_image, alpha=0.03), cv2.COLORMAP_JET)
         # cv2.imshow('depth_colormap', depth_colormap)
@@ -284,13 +405,15 @@ class PandaGraspController(object):
         # TODO: need to check   
         # for joint_target in self.scan_joints[1:]:
         #     self.pc.goto_joints(joint_target)
-        i = 1
-        for pose in ee_base_poses[1:]:
+        i = 0
+        for pose in ee_base_poses[0:]:
             self.pc.goto_pose(pose)
-            self.tsdf_server.T_cam_task = Ttarget2cam_list[i]
+            self.tsdf_server.T_cam_task = self.Ttarget2cam_list[i]
             rospy.sleep(0.1)
             self.tsdf_server.integrate = True
             self.tsdf_server.catch_image = True
+            rospy.sleep(0.1)
+            self.images.append(self.tsdf_server.rgb_image)
             cv2.imwrite(f'pose_{i}.jpg', self.tsdf_server.rgb_image)
             i += 1
         # TODO: need to check
@@ -373,10 +496,10 @@ class TSDFServer(object):
         # TODO: need check
         # self.intrinsic = CameraIntrinsic.from_dict(rospy.get_param("~cam/intrinsic"))
         
-        width, height = 640, 480 # ??
-        fx, fy = intrinsic_matrix[0, 0], intrinsic_matrix[1, 1]
-        cx, cy = intrinsic_matrix[0, 2], intrinsic_matrix[1, 2] 
-        self.intrinsic = CameraIntrinsic(width, height, fx, fy, cx, cy)
+        # width, height = 640, 480 # ??
+        # fx, fy = intrinsic_matrix[0, 0], intrinsic_matrix[1, 1]
+        # cx, cy = intrinsic_matrix[0, 2], intrinsic_matrix[1, 2] 
+        # self.intrinsic = CameraIntrinsic(width, height, fx, fy, cx, cy)
         # print(f"width, height, fx, fy, cx, cy: {(width, height, fx, fy, cx, cy)}")
         
         self.intrinsic = CameraIntrinsic(640, 480, 606.77737126, 606.70030146, 321.63287183, 236.95293136)
@@ -412,14 +535,8 @@ class TSDFServer(object):
             return
         self.integrate = False
         img = cv2.rotate(self.cv_bridge.imgmsg_to_cv2(msg).astype(np.float32) * 0.001, cv2.ROTATE_180)
-        # img = cv2.rotate(self.cv_bridge.imgmsg_to_cv2(msg).astype(np.float32), cv2.ROTATE_180)
-        print(f"img min: {img.min()}")
-        print(f"img max: {img.max()}")
         rospy.sleep(0.1)
-        # print(f"Depth image: {img.shape}")
         self.depth_image = img.copy()
-        # new_size = (480, 640) #(640, 480)
-        # img = cv2.resize(self.cv_bridge.imgmsg_to_cv2(msg).astype(np.float32) * 0.001, new_size, interpolation=cv2.INTER_AREA)
         # T_cam_task = self.tf_tree.lookup(
         #     self.cam_frame_id, "task", msg.header.stamp, rospy.Duration(0.1)
         # )
@@ -429,10 +546,8 @@ class TSDFServer(object):
             self.cam_frame_id, "task"
         )
         self.T_cam_task = np.linalg.inv(self.T_cam_task)
-        # self.T_cam_task[:3, 3] * 100
         self.T_cam_task[:3, 3] /= 1000.0
-        print(f"self.T_cam_task:\n {self.T_cam_task}")
-        # self.T_cam_task = Transform(Rotation.from_quat([0.0091755 ,  0.9995211 ,  0.00176319 ,-0.02950025]), [ 0.16363484, -0.14483834 , 0.44753983]).as_matrix()
+        # print(f"self.T_cam_task:\n {self.T_cam_task}")
 
         self.low_res_tsdf.integrate(img, self.intrinsic, self.T_cam_task)
         self.high_res_tsdf.integrate(img, self.intrinsic, self.T_cam_task)
@@ -485,9 +600,11 @@ class ArgumentParserForBlender(argparse.ArgumentParser):
         """
         return super().parse_args(args=self._get_argv_after_doubledash())
 
-def main(args):
+def main(args, round_idx, gpuid, render_frame_list):
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(gpuid)
     rospy.init_node("panda_grasp")
-    panda_grasp = PandaGraspController(args)
+    
+    panda_grasp = PandaGraspController(args, round_idx, gpuid, render_frame_list)
 
     while True:
         panda_grasp.run()
@@ -495,9 +612,62 @@ def main(args):
 
 
 if __name__ == "__main__":
+    """
     # parser = argparse.ArgumentParser()
     parser = ArgumentParserForBlender()
     parser.add_argument("--model", type=Path, required=False, default='/catkin_ws/GraspNeRF/src/nr/ckpt/test/model_best.pth')
     args = parser.parse_args()
     main(args)
+    """
+
+    argv = sys.argv
+    print(f"argv:\n {argv}")
+    argv = argv[argv.index("--") + 1:]  # get all args after "--"
+    round_idx = int(argv[0])
+    gpuid = int(argv[1])
+    expname = str(argv[2])
+    scene = str(argv[3])
+    object_set = str(argv[4])
+    check_seen_scene = bool(int(argv[5]))
+    material_type = str(argv[6])
+    blender_asset_dir = str(argv[7])
+    log_root_dir = str(argv[8])
+    use_gt_tsdf = bool(int(argv[9]))
+    render_frame_list=[int(frame_id) for frame_id in str(argv[10]).replace(' ','').split(",")]
+    method = str(argv[11])
+    print("########## Simulation Start ##########")
+    print("Round %d\nmethod: %s\nmaterial_type: %s\nviews: %s "%(round_idx, method, material_type, str(render_frame_list)))
+    print("######################################")
+
+    parser = ArgumentParserForBlender() ### argparse.ArgumentParser()
+    parser.add_argument("---model", type=Path, default="")
+    parser.add_argument("---logdir", type=Path, default=expname)
+    parser.add_argument("---description", type=str, default="")
+    parser.add_argument("---scene", type=str, choices=["pile", "packed", "single"], default=scene)
+    parser.add_argument("---object-set", type=str, default=object_set)
+    parser.add_argument("---num-objects", type=int, default=5)
+    parser.add_argument("---num-rounds", type=int, default=200)
+    parser.add_argument("---seed", type=int, default=42)
+    parser.add_argument("---sim-gui", type=bool, default=True)#False)
+    parser.add_argument("---rviz", action="store_true")
+    
+    ###
+    parser.add_argument("---renderer_root_dir", type=str, default=blender_asset_dir)
+    parser.add_argument("---log_root_dir", type=str, default=log_root_dir)
+    parser.add_argument("---obj_texture_image_root_path", type=str, default=blender_asset_dir+"/imagenet") #TODO   
+    parser.add_argument("---cfg_fn", type=str, default="src/nr/configs/nrvgn_sdf.yaml")
+    parser.add_argument('---database_name', type=str, default='vgn_syn/train/packed/packed_170-220/032cd891d9be4a16be5ea4be9f7eca2b/w_0.8', help='<dataset_name>/<scene_name>/<scene_setting>')
+
+    parser.add_argument("---gen_scene_descriptor", type=bool, default=False)
+    parser.add_argument("---load_scene_descriptor", type=bool, default=True)
+    parser.add_argument("---material_type", type=str, default=material_type)
+    parser.add_argument("---method", type=str, default=method)
+
+    # pybullet camera parameter
+    parser.add_argument("---camera_focal", type=float, default=446.31) #TODO 
+
+    ###
+    args = parser.parse_args()
+    main(args, round_idx, gpuid, render_frame_list)
+
     rospy.loginfo("[End]")
