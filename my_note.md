@@ -41,12 +41,13 @@ sudo docker compose -f docker/docker-compose-gui-nvidia.yml build
 sudo docker compose -f docker/docker-compose-gui-nvidia.yml up
 sudo docker exec -it ros_docker /bin/bash
 roscore
-rosrun rviz rviz
-roslaunch realsense2_camera rs_camera.launch
+rosrun rviz rviz -d config/panda_grasp.rviz
+roslaunch realsense2_camera rs_camera.launch depth_width:=640 depth_height:=480 depth_fps:=30
 
 # Start Realsense ROS node
-roslaunch realsense2_camera rs_camera.launch
+roslaunch realsense2_camera rs_camera.launch align_depth:=true depth_width:=640 depth_height:=480 depth_fps:=30 color_width:=640 color_height:=480 color_fps:=30 filters:=pointcloud
 
+roslaunch realsense2_camera rs_camera.launch depth_width:=640 depth_height:=480 depth_fps:=30 enable_pointcloud:=true publish_tf:=false
 # Knowning Errors
 Error response from daemon: failed to create task for container: failed to create shim task: OCI runtime create failed: runc create failed: unable to start container process: error during container init: error running hook #0: error running hook: exit status 1, stdout: , stderr: Auto-detected mode as 'legacy'
 nvidia-container-cli: initialization error: load library failed: libnvidia-ml.so.1: cannot open shared object file: no such file or directory: unknown

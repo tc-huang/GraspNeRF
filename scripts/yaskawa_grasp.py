@@ -25,6 +25,8 @@ from gd.utils import ros_utils
 from gd.utils.transform import Rotation, Transform
 from gd.utils.panda_control import PandaCommander
 
+# from nr.main import GraspNeRFPlanner
+
 import cv2
 
 from pysurroundcap.util import *
@@ -75,6 +77,8 @@ class PandaGraspController(object):
         self.create_planning_scene()
         self.tsdf_server = TSDFServer()
         self.plan_grasps = VGN(args.model, rviz=True)
+        
+        # self.grasp_planner = GraspNeRFPlanner(args)
 
         rospy.loginfo("Ready to take action")
 
@@ -114,9 +118,9 @@ class PandaGraspController(object):
         detected_error = False
         if np.any(msg.cartesian_collision):
             detected_error = True
-        for s in franka_msgs.msg.Errors.__slots__:
-            if getattr(msg.current_errors, s):
-                detected_error = True
+        # for s in franka_msgs.msg.Errors.__slots__:
+        #     if getattr(msg.current_errors, s):
+        #         detected_error = True
         if not self.robot_error and detected_error:
             self.robot_error = True
             rospy.logwarn("Detected robot error")
@@ -138,18 +142,30 @@ class PandaGraspController(object):
 
         tsdf, pc = self.acquire_tsdf()
         vis.draw_tsdf(tsdf.get_grid().squeeze(), tsdf.voxel_size)
-        vis.draw_points(np.asarray(pc.points))
+        # vis.draw_tsdf(tsdf.get_grid().squeeze(), tsdf.voxel_size * 0.001) 
+        # vis.draw_points(np.asarray(pc.points))
+    
+        # vis.draw_points(np.asarray([[300, 300, 300]]))
         rospy.loginfo("Reconstructed scene")
 
+
         state = State(tsdf, pc)
+        
+        # TODO: JH need to check 
         grasps, scores, planning_time = self.plan_grasps(state)
+        # timings = {}
+        # n_grasp = 0
+        # grasps, scores, timings["planning"] = grasp_plan_fn(render_frame_list, round_idx, n_grasp, gt_tsdf)
+        
         vis.draw_grasps(grasps, scores, self.finger_depth)
         rospy.loginfo("Planned grasps")
 
         if len(grasps) == 0:
             rospy.loginfo("No grasps detected")
             return
-
+        
+        # TODO: JH need to check
+        # grasp, score = grasps[0], scores[0]
         grasp, score = self.select_grasp(grasps, scores)
         vis.draw_grasp(grasp, score, self.finger_depth)
         rospy.loginfo("Selected grasp")
@@ -200,7 +216,7 @@ class PandaGraspController(object):
         # cv2.waitKey(0)
         # cv2.destroyAllWindows()
         T_aruco2cam_init = tvec_rvec_to_T(tvec, rvec, use_degree=False)
-        # print(f"T_aruco2cam_init:\n {T_aruco2cam_init}")
+        print(f"T_aruco2cam_init:\n {T_aruco2cam_init}")
         
         cv2.imshow('image for aruco', aruco_detect_result)
         cv2.waitKey(0)
@@ -228,7 +244,7 @@ class PandaGraspController(object):
     def __camera_pose_2_Ttarget2cam(self, camera_pose):
         x, y, z = camera_pose.x, camera_pose.y, camera_pose.z
         rx_deg, ry_deg, rz_deg = camera_pose.rx_deg, camera_pose.ry_deg, camera_pose.rz_deg
-        Ttarget2cam =  T_gripper2base_init = xyzrpy_to_T(x, y, z, rx_deg, ry_deg, rz_deg) 
+        Ttarget2cam = xyzrpy_to_T(x, y, z, rx_deg, ry_deg, rz_deg) 
         return Ttarget2cam
      
     def acquire_tsdf(self):
@@ -236,41 +252,56 @@ class PandaGraspController(object):
         T_gripper2base_init, T_aruco2cam_init = self.__obtain_inition_coordinate_relation()
         level_poses_list = [LevelPosesConfig(theta_deg=30, phi_begin_deg=0, phi_end_deg=360, r=400, num_poses=6)]
         camera_poses = create_poses(level_poses_list, WORKSPACE_SIZE_MM)
-        print(f"camera_poses:\n {camera_poses}")
+        # print(f"camera_poses:\n {camera_poses}")
         ee_base_poses = self.__get_ee_base_poses(camera_poses, T_gripper2base_init, T_aruco2cam_init)
-        print(f"ee_base_pose:\n {ee_base_poses}")
+        # print(f"ee_base_pose:\n {ee_base_poses}")
         Ttarget2cam_list = [self.__camera_pose_2_Ttarget2cam(camera_pose) for camera_pose in camera_poses]
         
+        self.tsdf_server.T_cam_task = T_aruco2cam_init
+
         # TODO: need to check   
         # self.pc.goto_joints(self.scan_joints[0])
+        rospy.sleep(0.1) 
+
         self.pc.goto_pose(ee_base_poses[0])
-        self.tsdf_server.catch_image = True
         self.tsdf_server.T_cam_task = Ttarget2cam_list[0]
+        # self.tsdf_server.T_cam_task = xyzrpy_to_T(camera_poses[0].x, camera_poses[0].y, camera_poses[0].z, camera_poses[0].rx_deg, camera_poses[0].ry_deg, camera_poses[0].rz_deg)
+        
+        
+        self.tsdf_server.catch_image = True
         rospy.sleep(0.1)
         cv2.imwrite('pose_0.jpg', self.tsdf_server.rgb_image)
 
         # TODO: need to check
         self.tsdf_server.reset()
         self.tsdf_server.integrate = True
-
+        
+        # depth_colormap = cv2.applyColorMap(cv2.convertScaleAbs(self.tsdf_server.depth_image, alpha=0.03), cv2.COLORMAP_JET)
+        # cv2.imshow('depth_colormap', depth_colormap)
+        # cv2.imshow('depth_colormap', self.tsdf_server.depth_image)
+        # cv2.waitKey(0)
+        # cv2.destroyAllWindows()
         # TODO: need to check   
         # for joint_target in self.scan_joints[1:]:
         #     self.pc.goto_joints(joint_target)
         i = 1
         for pose in ee_base_poses[1:]:
             self.pc.goto_pose(pose)
-            rospy.sleep(0.1)
-            self.tsdf_server.catch_image = True
             self.tsdf_server.T_cam_task = Ttarget2cam_list[i]
-            self.tsdf_server.integrate = True 
+            rospy.sleep(0.1)
+            self.tsdf_server.integrate = True
+            self.tsdf_server.catch_image = True
             cv2.imwrite(f'pose_{i}.jpg', self.tsdf_server.rgb_image)
             i += 1
         # TODO: need to check
         # self.tsdf_server.integrate = False
         tsdf = self.tsdf_server.low_res_tsdf
         pc = self.tsdf_server.high_res_tsdf.get_cloud()
+        # pc = self.tsdf_server.low_res_tsdf.get_cloud()
         
         self.pc.home()
+        print(f"TSDF:\n {np.any(tsdf.get_grid()), tsdf.get_grid().shape, tsdf.get_grid().min(), tsdf.get_grid().max()}")
+        print(f"pc:\n {np.any(pc)}")
 
         return tsdf, pc
 
@@ -341,14 +372,19 @@ class TSDFServer(object):
         
         # TODO: need check
         # self.intrinsic = CameraIntrinsic.from_dict(rospy.get_param("~cam/intrinsic"))
+        
         width, height = 640, 480 # ??
         fx, fy = intrinsic_matrix[0, 0], intrinsic_matrix[1, 1]
         cx, cy = intrinsic_matrix[0, 2], intrinsic_matrix[1, 2] 
         self.intrinsic = CameraIntrinsic(width, height, fx, fy, cx, cy)
+        # print(f"width, height, fx, fy, cx, cy: {(width, height, fx, fy, cx, cy)}")
+        
+        self.intrinsic = CameraIntrinsic(640, 480, 606.77737126, 606.70030146, 321.63287183, 236.95293136)
         
         # TODO: need check
         #self.size = 6.0 * rospy.get_param("~finger_depth")
-        self.size = 30
+        self.size = 0.3
+        # self.size = 300 # mm
         
         self.cv_bridge = cv_bridge.CvBridge()
         self.tf_tree = ros_utils.TransformTree()
@@ -359,8 +395,13 @@ class TSDFServer(object):
         rospy.Subscriber(self.cam_rgb_topic_name, sensor_msgs.msg.Image, self.__rgb_callback)
         self.catch_image = False
         self.rgb_image = None
+        self.depth_image = None
 
         self.T_cam_task = np.eye(4)
+
+        self.low_res_tsdf = TSDFVolume(self.size, 40)
+        self.high_res_tsdf = TSDFVolume(self.size, 120)
+
         
     def reset(self):
         self.low_res_tsdf = TSDFVolume(self.size, 40)
@@ -369,21 +410,38 @@ class TSDFServer(object):
     def sensor_cb(self, msg):
         if not self.integrate:
             return
-        new_size = (640, 480)
-        img = cv2.resize(self.cv_bridge.imgmsg_to_cv2(msg).astype(np.float32) * 0.001, new_size, interpolation=cv2.INTER_AREA)
+        self.integrate = False
+        img = cv2.rotate(self.cv_bridge.imgmsg_to_cv2(msg).astype(np.float32) * 0.001, cv2.ROTATE_180)
+        # img = cv2.rotate(self.cv_bridge.imgmsg_to_cv2(msg).astype(np.float32), cv2.ROTATE_180)
+        print(f"img min: {img.min()}")
+        print(f"img max: {img.max()}")
+        rospy.sleep(0.1)
+        # print(f"Depth image: {img.shape}")
+        self.depth_image = img.copy()
+        # new_size = (480, 640) #(640, 480)
+        # img = cv2.resize(self.cv_bridge.imgmsg_to_cv2(msg).astype(np.float32) * 0.001, new_size, interpolation=cv2.INTER_AREA)
         # T_cam_task = self.tf_tree.lookup(
         #     self.cam_frame_id, "task", msg.header.stamp, rospy.Duration(0.1)
         # )
-        print(f"Depth img shape: {img.shape}")
+        
+        self.tf_tree.broadcast_static(
+            Transform(Rotation.from_matrix(self.T_cam_task[:3, :3]), self.T_cam_task[:3, 3]), 
+            self.cam_frame_id, "task"
+        )
+        self.T_cam_task = np.linalg.inv(self.T_cam_task)
+        # self.T_cam_task[:3, 3] * 100
+        self.T_cam_task[:3, 3] /= 1000.0
+        print(f"self.T_cam_task:\n {self.T_cam_task}")
+        # self.T_cam_task = Transform(Rotation.from_quat([0.0091755 ,  0.9995211 ,  0.00176319 ,-0.02950025]), [ 0.16363484, -0.14483834 , 0.44753983]).as_matrix()
+
         self.low_res_tsdf.integrate(img, self.intrinsic, self.T_cam_task)
         self.high_res_tsdf.integrate(img, self.intrinsic, self.T_cam_task)
-        self.integrate = False
 
     def __rgb_callback(self, msg):
         if self.catch_image is True:
-            self.rgb_image = cv2.rotate(cv2.cvtColor(self.cv_bridge.imgmsg_to_cv2(msg).astype(np.uint8), cv2.COLOR_BGR2RGB), cv2.ROTATE_180)
             self.catch_image = False
-            rospy.loginfo("[Camera] Catch color and depth image")
+            self.rgb_image = cv2.rotate(cv2.cvtColor(self.cv_bridge.imgmsg_to_cv2(msg).astype(np.uint8), cv2.COLOR_BGR2RGB), cv2.ROTATE_180)
+            rospy.loginfo("[Camera] Catch RGB image")
         else:
             return
             
