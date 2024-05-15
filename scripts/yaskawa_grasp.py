@@ -50,8 +50,33 @@ with open(CALIBRATION_PARAMS_JSON) as f:
     T_cam2gripper = np.array(calibration_params["T_cam2gripper"])
     T_target2cam = np.array(calibration_params["T_target2cam"])
     T_gripper2base = np.array(calibration_params["T_gripper2base"])
-    intrinsic_matrix = np.array(calibration_params["intrinsic_matrix"])
-    distortion_coefficients = np.array(calibration_params["distortion_coefficients"])
+    # intrinsic_matrix = np.array(calibration_params["intrinsic_matrix"])
+    # distortion_coefficients = np.array(calibration_params["distortion_coefficients"])
+
+
+# intrinsic_matrix = np.array(
+#     [
+#         [615.1546630859375, 0.0, 319.93634033203125],
+#         [0.0, 614.8789672851562, 237.51785278320312],
+#         [0.0, 0.0, 1.0]
+#     ]
+# ) # 640x480
+
+intrinsic_matrix = np.array(
+    [
+        [461.3659973144531, 0.0, 319.9522705078125],
+        [0.0, 461.15924072265625, 178.1383819580078],
+        [0.0, 0.0, 1.0]
+    ]
+) # 640x360
+
+# 512x288
+intrinsic_matrix[0, 0] /= (640 / 512)
+intrinsic_matrix[0, 2] /= (640 / 512)
+intrinsic_matrix[1, 1] /= (360 / 288)
+intrinsic_matrix[1, 2] /= (360 / 288)
+
+distortion_coefficients = np.array([0.0, 0.0, 0.0, 0.0, 0.0])
 
 ARUCO_DICTIONARY = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_5X5_1000)
 ARUCO_PARAMETERS = cv2.aruco.DetectorParameters()
@@ -214,7 +239,9 @@ class PandaGraspController(object):
         # self.pc.home()
 
         tsdf, pc = self.acquire_tsdf()
-        vis.draw_tsdf(tsdf.get_grid().squeeze(), tsdf.voxel_size)
+
+        # vis.draw_tsdf(tsdf.get_grid().squeeze(), tsdf.voxel_size)
+
         # vis.draw_tsdf(tsdf.get_grid().squeeze(), tsdf.voxel_size * 0.001) 
         # vis.draw_points(np.asarray(pc.points))
     
@@ -238,16 +265,24 @@ class PandaGraspController(object):
         extrinsics: np array of shape (3, 4, 4), the transformation matrix from world to camera
         intrinsics: np array of shape (3, 3, 3)
         """
-        new_size = (480, 640) #(640, 480)
+        # for i, img in enumerate(self.images):
+        #     cv2.imshow(f'img_{i}', cv2.resize(img, (512, 288), interpolation=cv2.INTER_AREA))
+        # cv2.waitKey()
+        # cv2.destroyAllWindows()
+
+        new_size = (512, 288)
         # images = np.array([cv2.resize(image, new_size, interpolation=cv2.INTER_AREA).permute((2, 0, 1)) for image in self.images])
-        images = np.array([cv2.resize(image, new_size, interpolation=cv2.INTER_AREA).transpose((2, 0, 1)) for image in self.images])
+        N = 6
+        images = np.array([image.transpose((2, 0, 1)) for image in self.images[:N]])
         # extrinsics = np.array(self.Ttarget2cam_list)
-        l = [np.linalg.inv(Ttarget2cam) for Ttarget2cam in self.Ttarget2cam_list]
+        l = [np.linalg.inv(Ttarget2cam) for Ttarget2cam in self.Ttarget2cam_list[:N]]
+        # l =  np.array(self.Ttarget2cam_list)
         for Ttarget2cam in l:
             Ttarget2cam[:3, 3] /= 1000.0
         extrinsics = np.array(l)
-        intrinsics = np.array([intrinsic_matrix] * 6)
-        depth_range=np.array([[0.2, 0.8] for _ in range(6)])
+        intrinsics = np.array([intrinsic_matrix] * N)
+        # depth_range=np.array([[0.2, 0.8] for _ in range(6)])
+        depth_range=np.array([[0.1, 0.9] for _ in range(N)])
         print(f"images {images.shape}")
         print(f"extrinsics {extrinsics.shape}")
         print(f"intrinsics {intrinsics.shape}")
@@ -256,6 +291,7 @@ class PandaGraspController(object):
         tsdf_vol, qual_vol_ori, rot_vol_ori, width_vol_ori, toc = self.grasp_plan_fn.core(images, extrinsics, intrinsics, depth_range=depth_range)
         rospy.loginfo(f"[TSDF] draw TSDF2")
         vis.draw_tsdf(tsdf_vol, tsdf.voxel_size)
+        return
         self.tsdf_thres_high = 0 
         self.tsdf_thres_low = -0.85
         ngrasp = 0
@@ -302,6 +338,7 @@ class PandaGraspController(object):
         self.pc.home()
     
     def __aruco_detect(self, image):
+
         frame = image.copy()       
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
       
@@ -310,6 +347,7 @@ class PandaGraspController(object):
         if ids is not None:
             cv2.aruco.drawDetectedMarkers(frame, corners, ids)
             for i in range(len(ids)):
+                print(f"intrinsic_matrix: {intrinsic_matrix}")
                 rvec, tvec, _ = cv2.aruco.estimatePoseSingleMarkers(corners[i], ARUCO_MARK_LENGTH, intrinsic_matrix, distortion_coefficients)
                 frame = cv2.drawFrameAxes(frame, intrinsic_matrix, distortion_coefficients, rvec, tvec, 30)
                 # frame = workspace_AR(frame, tvec[i], rvec[i], intrinsic_matrix, distortion_coefficients, WORKSPACE_SIZE_MM, TSDF_SIZE)
@@ -338,9 +376,9 @@ class PandaGraspController(object):
         T_aruco2cam_init = tvec_rvec_to_T(tvec, rvec, use_degree=False)
         print(f"T_aruco2cam_init:\n {T_aruco2cam_init}")
         
-        # cv2.imshow('image for aruco', aruco_detect_result)
-        # cv2.waitKey(0)
-        # cv2.destroyAllWindows()
+        cv2.imshow('image for aruco', aruco_detect_result)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
         
         return T_gripper2base_init, T_aruco2cam_init
     
@@ -496,13 +534,13 @@ class TSDFServer(object):
         # TODO: need check
         # self.intrinsic = CameraIntrinsic.from_dict(rospy.get_param("~cam/intrinsic"))
         
-        # width, height = 640, 480 # ??
-        # fx, fy = intrinsic_matrix[0, 0], intrinsic_matrix[1, 1]
-        # cx, cy = intrinsic_matrix[0, 2], intrinsic_matrix[1, 2] 
-        # self.intrinsic = CameraIntrinsic(width, height, fx, fy, cx, cy)
-        # print(f"width, height, fx, fy, cx, cy: {(width, height, fx, fy, cx, cy)}")
+        width, height = 640, 480 # ??
+        fx, fy = intrinsic_matrix[0, 0], intrinsic_matrix[1, 1]
+        cx, cy = intrinsic_matrix[0, 2], intrinsic_matrix[1, 2] 
+        self.intrinsic = CameraIntrinsic(width, height, fx, fy, cx, cy)
+        print(f"width, height, fx, fy, cx, cy: {(width, height, fx, fy, cx, cy)}")
         
-        self.intrinsic = CameraIntrinsic(640, 480, 606.77737126, 606.70030146, 321.63287183, 236.95293136)
+        # self.intrinsic = CameraIntrinsic(640, 480, 606.77737126, 606.70030146, 321.63287183, 236.95293136)
         
         # TODO: need check
         #self.size = 6.0 * rospy.get_param("~finger_depth")
@@ -555,7 +593,9 @@ class TSDFServer(object):
     def __rgb_callback(self, msg):
         if self.catch_image is True:
             self.catch_image = False
-            self.rgb_image = cv2.rotate(cv2.cvtColor(self.cv_bridge.imgmsg_to_cv2(msg).astype(np.uint8), cv2.COLOR_BGR2RGB), cv2.ROTATE_180)
+            # self.rgb_image = cv2.rotate(cv2.cvtColor(self.cv_bridge.imgmsg_to_cv2(msg).astype(np.uint8), cv2.COLOR_BGR2RGB), cv2.ROTATE_180)
+            new_size = (512, 288)
+            self.rgb_image = cv2.resize(cv2.rotate(cv2.cvtColor(self.cv_bridge.imgmsg_to_cv2(msg).astype(np.uint8), cv2.COLOR_BGR2RGB), cv2.ROTATE_180), new_size, interpolation=cv2.INTER_AREA)
             rospy.loginfo("[Camera] Catch RGB image")
         else:
             return
