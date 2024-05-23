@@ -164,9 +164,9 @@ class PandaGraspController(object):
         z_offset = -0.06
         t_tag_task = np.r_[[-0.5 * self.size, -0.5 * self.size, z_offset]]
         T_tag_task = Transform(Rotation.identity(), t_tag_task)
-        self.T_base_task = T_base_tag * T_tag_task
+        # self.T_base_task = T_base_tag * T_tag_task
 
-        self.tf_tree.broadcast_static(self.T_base_task, self.base_frame_id, "task")
+        # self.tf_tree.broadcast_static(self.T_base_task, self.base_frame_id, "task")
         rospy.sleep(1.0)  # wait for the TF to be broadcasted
 
     def create_planning_scene(self):
@@ -353,7 +353,7 @@ class PandaGraspController(object):
         np.save('my_images.npy', images)
         np.save('my_intrinsics.npy', intrinsics)
         np.save('real_extrinsics.npy', np.array(extrinsics))
-        return
+ 
         self.tsdf_thres_high = 0 
         self.tsdf_thres_low = -0.85
         ngrasp = 0
@@ -363,7 +363,8 @@ class PandaGraspController(object):
 
         if len(grasps) > 0:
             np.random.seed(self.args.seed + round_idx + n_grasp)
-            p = np.random.permutation(len(grasps))  
+            p = np.random.permutation(len(grasps))
+            self.voxel_size = 0.3 / 40
             grasps = [from_voxel_coordinates(g, self.voxel_size) for g in grasps[p]]
             scores = scores[p]
             indexs = indexs[p]
@@ -381,22 +382,52 @@ class PandaGraspController(object):
         
         # TODO: JH need to check
         # grasp, score = grasps[0], scores[0]
-        grasp, score = self.select_grasp(grasps, scores)
+        grasp, score = self.select_grasp(grasps, scores) # grasp is gd.grasp.Grasp object
         vis.draw_grasp(grasp, score, self.finger_depth)
         rospy.loginfo("Selected grasp")
 
         # TODO: need implimentation
-        # self.pc.home()
+
+        rospy.loginfo(f"Selected grasp pose {grasp.pose}") # grasp.pose is gd.utils.transform.Transform
+        rospy.loginfo(f"Selected grasp width {grasp.width}")
+
+        pose_list = grasp.pose.to_list()
+        Rx, Ry, Rz = R.from_quat(pose_list[:4]).as_euler("xyz", degrees=True)
+        tx, ty, tz = pose_list[4:] * 1000 # m -> mm
+
+        rospy.loginfo(f"Selected grasp Rx, Ry, Rz: {Rx, Ry, Rz}")
+        rospy.loginfo(f"Selected grasp tx, ty, tz: {tx, ty, tz}")
+
+        
         label = self.execute_grasp(grasp)
         rospy.loginfo("Grasp execution")
 
-        if self.robot_error:
-            self.recover_robot()
-            return
+        # if self.robot_error:
+        #     self.recover_robot()
+        #     return
 
-        if label:
-            self.drop()
-        # TODO: need implimentation
+        # if label:
+        #     self.drop()
+
+        
+
+        
+        # self.pose = pose
+        # self.width = width
+
+
+        # def to_voxel_coordinates(grasp, voxel_size):
+        #     pose = grasp.pose
+        #     pose.translation /= voxel_size
+        #     width = grasp.width / voxel_size
+        #     return Grasp(pose, width)
+
+
+        # def from_voxel_coordinates(grasp, voxel_size):
+        #     pose = grasp.pose
+        #     pose.translation *= voxel_size
+        #     width = grasp.width * voxel_size
+        #     return Grasp(pose, width)
         self.pc.home()
     
     def __aruco_detect(self, image):
@@ -441,6 +472,8 @@ class PandaGraspController(object):
         cv2.imshow('image for aruco', aruco_detect_result)
         cv2.waitKey(0)
         cv2.destroyAllWindows()
+
+        self.T_base_task = Transform.from_matrix(T_gripper2base_init @ T_cam2gripper @ T_aruco2cam_init)
         
         return T_gripper2base_init, T_aruco2cam_init
     
@@ -593,16 +626,49 @@ class PandaGraspController(object):
         return grasp, score
 
     def execute_grasp(self, grasp):
-        T_task_grasp = grasp.pose
-        T_base_grasp = self.T_base_task * T_task_grasp
+        #""" Testing
+        # pose_list = self.T_base_task.to_list()
+        # Rx, Ry, Rz = R.from_quat(pose_list[:4]).as_euler("xyz", degrees=True)
+        # Rx, Ry, Rz = 180, 0, 90
+        # tx, ty, tz = pose_list[4:] # m -> mm
+        # self.pc.goto_pose([tx, ty, tz, Rx, Ry, Rz])
+        # return True
+        #"""
+        T_gripper_Rz_90 = Transform.from_matrix(xyzrpy_to_T(0, 0, 0, 0, 0, 90))
+        #""" Testing
+        # pose_list = (self.T_base_task * T_gripper_Rz_90).to_list()
+        # Rx, Ry, Rz = R.from_quat(pose_list[:4]).as_euler("xyz", degrees=True)
+        # Rx, Ry, Rz = 180, 0, 90
+        # tx, ty, tz = pose_list[4:] # m -> mm
+        # self.pc.goto_pose([tx, ty, tz, Rx, Ry, Rz])
+        # return True
+        #"""
+        T_task_grasp = grasp.pose.as_matrix()
+        T_task_grasp[:3, 3] *= 1000
+        T_task_grasp = Transform.from_matrix(T_task_grasp)
 
-        T_grasp_pregrasp = Transform(Rotation.identity(), [0.0, 0.0, -0.05])
-        T_grasp_retreat = Transform(Rotation.identity(), [0.0, 0.0, -0.05])
+        T_base_grasp = self.T_base_task * T_task_grasp * T_gripper_Rz_90
+
+        # T_grasp_pregrasp = Transform(Rotation.identity(), [0.0, 0.0, -0.05])
+        T_grasp_pregrasp = Transform(Rotation.identity(), [0.0, 0.0, -0.05 * 1000])
+        # T_grasp_retreat = Transform(Rotation.identity(), [0.0, 0.0, -0.05])
+        T_grasp_retreat = Transform(Rotation.identity(), [0.0, 0.0, -0.05 * 1000])
+
         T_base_pregrasp = T_base_grasp * T_grasp_pregrasp
         T_base_retreat = T_base_grasp * T_grasp_retreat
 
-        self.pc.goto_pose(T_base_pregrasp * self.T_tcp_tool0, velocity_scaling=0.2)
-        self.approach_grasp(T_base_grasp)
+        # self.pc.goto_pose(T_base_pregrasp * self.T_tcp_tool0, velocity_scaling=0.2)
+        pose_list = T_base_pregrasp.to_list()
+        Rx, Ry, Rz = R.from_quat(pose_list[:4]).as_euler("xyz", degrees=True)
+        tx, ty, tz = pose_list[4:]
+        self.pc.goto_pose([tx, ty, tz, Rx, Ry, Rz])
+
+
+        # self.approach_grasp(T_base_grasp)
+        pose_list = T_base_grasp.to_list()
+        Rx, Ry, Rz = R.from_quat(pose_list[:4]).as_euler("xyz", degrees=True)
+        tx, ty, tz = pose_list[4:]
+        self.pc.goto_pose([tx, ty, tz, Rx, Ry, Rz])
 
         if self.robot_error:
             return False
@@ -612,17 +678,29 @@ class PandaGraspController(object):
         if self.robot_error:
             return False
 
-        self.pc.goto_pose(T_base_retreat * self.T_tcp_tool0)
+        # self.pc.goto_pose(T_base_retreat * self.T_tcp_tool0)
+        pose_list = T_base_retreat.to_list()
+        Rx, Ry, Rz = R.from_quat(pose_list[:4]).as_euler("xyz", degrees=True)
+        tx, ty, tz = pose_list[4:]
+        self.pc.goto_pose([tx, ty, tz, Rx, Ry, Rz])
 
         # lift hand
-        T_retreat_lift_base = Transform(Rotation.identity(), [0.0, 0.0, 0.1])
-        T_base_lift = T_retreat_lift_base * T_base_retreat
-        self.pc.goto_pose(T_base_lift * self.T_tcp_tool0)
+        # T_retreat_lift_base = Transform(Rotation.identity(), [0.0, 0.0, 0.1])
+        T_retreat_lift_base = Transform(Rotation.identity(), [0.0, 0.0, 0.1 * 1000])
 
-        if self.gripper_width > 0.004:
-            return True
-        else:
-            return False
+        T_base_lift = T_retreat_lift_base * T_base_retreat
+        # self.pc.goto_pose(T_base_lift * self.T_tcp_tool0)
+        pose_list = T_base_lift.to_list()
+        Rx, Ry, Rz = R.from_quat(pose_list[:4]).as_euler("xyz", degrees=True)
+        tx, ty, tz = pose_list[4:]
+        self.pc.goto_pose([tx, ty, tz, Rx, Ry, Rz])
+
+        # TODO
+        # if self.gripper_width > 0.004:
+        #     return True
+        # else:
+        #     return False
+        return True
 
     def approach_grasp(self, T_base_grasp):
         self.pc.goto_pose(T_base_grasp * self.T_tcp_tool0)
