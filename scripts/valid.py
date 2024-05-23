@@ -5,6 +5,9 @@ Open-loop grasp execution using a Panda arm and wrist-mounted RealSense camera.
 """
 
 FAKE = False
+N = 6
+R_ = 400
+THETA = 30
 
 import os
 import argparse
@@ -34,10 +37,12 @@ from nr.main import GraspNeRFPlanner
 import cv2
 
 from pysurroundcap.util import *
-from pysurroundcap.data_struct import LevelPosesConfig
+from pysurroundcap.data_struct import LevelPosesConfig, CameraPose
 from pysurroundcap.pose import create_poses
 
 from scipy import ndimage
+
+from scipy.spatial.transform import Rotation
 
 # tag lies on the table in the center of the workspace
 T_base_tag = Transform(Rotation.identity(), [0.42, 0.02, 0.21])
@@ -52,6 +57,19 @@ with open(CALIBRATION_PARAMS_JSON) as f:
     T_gripper2base = np.array(calibration_params["T_gripper2base"])
     # intrinsic_matrix = np.array(calibration_params["intrinsic_matrix"])
     # distortion_coefficients = np.array(calibration_params["distortion_coefficients"])
+# IMG_W = 1280
+# IMG_H = 720
+
+IMG_W = 640
+IMG_H = 360
+
+# intrinsic_matrix = np.array(
+#     [
+#         [922.7319946289062, 0.0, 639.904541015625],
+#         [0.0, 922.3184814453125, 356.2767639160156],
+#         [0.0, 0.0, 1.0]
+#     ]
+# ) # 1280x720
 
 
 # intrinsic_matrix = np.array(
@@ -71,10 +89,10 @@ intrinsic_matrix = np.array(
 ) # 640x360
 
 # 512x288
-intrinsic_matrix[0, 0] /= (640 / 512)
-intrinsic_matrix[0, 2] /= (640 / 512)
-intrinsic_matrix[1, 1] /= (360 / 288)
-intrinsic_matrix[1, 2] /= (360 / 288)
+intrinsic_matrix[0, 0] /= (IMG_W / 512)
+intrinsic_matrix[0, 2] /= (IMG_W / 512)
+intrinsic_matrix[1, 1] /= (IMG_H / 288)
+intrinsic_matrix[1, 2] /= (IMG_H / 288)
 
 distortion_coefficients = np.array([0.0, 0.0, 0.0, 0.0, 0.0])
 
@@ -239,7 +257,7 @@ class PandaGraspController(object):
         # self.pc.home()
 
         tsdf, pc = self.acquire_tsdf()
-
+        
         # vis.draw_tsdf(tsdf.get_grid().squeeze(), tsdf.voxel_size)
 
         # vis.draw_tsdf(tsdf.get_grid().squeeze(), tsdf.voxel_size * 0.001) 
@@ -248,8 +266,9 @@ class PandaGraspController(object):
         # vis.draw_points(np.asarray([[300, 300, 300]]))
         rospy.loginfo("Reconstructed scene")
 
-
+        
         state = State(tsdf, pc)
+        
         
         # TODO: JH need to check 
         # grasps, scores, planning_time = self.plan_grasps(state)
@@ -272,25 +291,40 @@ class PandaGraspController(object):
 
         new_size = (512, 288)
         # images = np.array([cv2.resize(image, new_size, interpolation=cv2.INTER_AREA).permute((2, 0, 1)) for image in self.images])
-        N = 6
-        images = np.array([image.transpose((2, 0, 1)) for image in self.images[:N]])
+        
+        images = np.array([cv2.rotate(image, cv2.ROTATE_180).transpose((2, 0, 1)) for image in self.images[:N]])
+        # images = np.array([image.transpose((2, 0, 1)) for image in self.images[:N]])
         # extrinsics = np.array(self.Ttarget2cam_list)
-        l = [np.linalg.inv(Ttarget2cam) for Ttarget2cam in self.Ttarget2cam_list[:N]]
-        # l =  np.array(self.Ttarget2cam_list)
-        for Ttarget2cam in l:
-            Ttarget2cam[:3, 3] /= 1000.0
-        extrinsics = np.array(l)
+        
+        level_poses_list = [LevelPosesConfig(theta_deg=THETA, phi_begin_deg=0, phi_end_deg=360, r=R_, num_poses=N)]
+        camera_poses2= create_poses(level_poses_list, 0)
+        extrinsics = np.array([np.linalg.inv(self.__camera_pose_2_Ttarget2cam(camera_pose, rot_z_180=True)) for camera_pose in camera_poses2])
+        for e in extrinsics:
+            e[:3, 3] /= 1000.0
+
         intrinsics = np.array([intrinsic_matrix] * N)
-        # depth_range=np.array([[0.2, 0.8] for _ in range(6)])
-        depth_range=np.array([[0.1, 0.9] for _ in range(N)])
+        depth_range=np.array([[0.2, 0.8] for _ in range(N)])
+        # depth_range=np.array([[0.1, 0.6] for _ in range(N)])
         print(f"images {images.shape}")
         print(f"extrinsics {extrinsics.shape}")
         print(f"intrinsics {intrinsics.shape}")
         print(f"depth_range {depth_range.shape}")
+        # extrinsics = np.load('/catkin_ws/GraspNeRF/extrinsics.npy')
+
+
+        images = np.load('/catkin_ws/GraspNeRF/images.npy')
+        extrinsics = np.load('/catkin_ws/GraspNeRF/extrinsics.npy')
+        intrinsics = np.load('/catkin_ws/GraspNeRF/intrinsics.npy')
+        depth_range = np.load('/catkin_ws/GraspNeRF/scripts/depth_range.npy')
+
+
 
         tsdf_vol, qual_vol_ori, rot_vol_ori, width_vol_ori, toc = self.grasp_plan_fn.core(images, extrinsics, intrinsics, depth_range=depth_range)
         rospy.loginfo(f"[TSDF] draw TSDF2")
         vis.draw_tsdf(tsdf_vol, tsdf.voxel_size)
+
+        np.save('my_images.npy', images)
+        np.save('real_extrinsics.npy', np.array(extrinsics))
         return
         self.tsdf_thres_high = 0 
         self.tsdf_thres_low = -0.85
@@ -399,17 +433,48 @@ class PandaGraspController(object):
         # transforms_data.save_json('transforms.json')
         return results
     
-    def __camera_pose_2_Ttarget2cam(self, camera_pose):
+    def __camera_pose_2_Ttarget2cam(self, camera_pose, rot_z_180=False):
         x, y, z = camera_pose.x, camera_pose.y, camera_pose.z
         rx_deg, ry_deg, rz_deg = camera_pose.rx_deg, camera_pose.ry_deg, camera_pose.rz_deg
-        Ttarget2cam = xyzrpy_to_T(x, y, z, rx_deg, ry_deg, rz_deg) 
-        return Ttarget2cam
+        if not rot_z_180:
+            Ttarget2cam = xyzrpy_to_T(x, y, z, rx_deg, ry_deg, rz_deg)
+            return Ttarget2cam
+        else:
+            T = np.eye(4)
+            T[:3, 3] = np.array([x, y, z])
+            # T[:3, :3] = R.from_euler("xyz", [rx, ry, rz], degrees=True).as_matrix()
+            T[:3, :3] = (R.from_euler("z", rz_deg, degrees=True)
+                * R.from_euler("y", ry_deg, degrees=True)
+                * R.from_euler("x", rx_deg, degrees=True)
+                * R.from_euler("z", 180, degrees=True)).as_matrix()
+            return T
+            
      
     def acquire_tsdf(self):
         # TODO: need implimentation
         T_gripper2base_init, T_aruco2cam_init = self.__obtain_inition_coordinate_relation()
-        level_poses_list = [LevelPosesConfig(theta_deg=30, phi_begin_deg=0, phi_end_deg=360, r=400, num_poses=6)]
+        level_poses_list = [LevelPosesConfig(theta_deg=THETA, phi_begin_deg=0, phi_end_deg=360, r=R_, num_poses=N)]
         camera_poses = create_poses(level_poses_list, WORKSPACE_SIZE_MM)
+        
+        
+        # t = camera_poses.copy()
+ 
+        # sim_extrinsics = np.load('/catkin_ws/GraspNeRF/extrinsics.npy')
+        # camera_poses = []
+        # for i in range(len(sim_extrinsics)):
+        #     m = np.vstack([sim_extrinsics[i], np.array([0, 0, 0, 1])]).copy()
+        #     # m = np.linalg.inv(m)
+        #     m[:3, 3] /= (5 / 3)
+        #     m[:3, 3] *= 1000
+        #     x, y, z, r, p, y = T_to_xyzrpy(m)
+        #     # camera_poses.append(CameraPose(x, y, z, r, p, y))
+        #     camera_poses.append(CameraPose(t[0].x, t[0].y, t[0].z, r, p, y))
+        #     # camera_poses.append(CameraPose(x, y, z, 0, 180, 180))
+        # camera_poses.reverse()
+        # print()
+        # for i in range(len(camera_poses)):
+        #     print(f"new cmaera_poses {i}: {camera_poses[i]}")
+        
         # print(f"camera_poses:\n {camera_poses}")
         ee_base_poses = self.__get_ee_base_poses(camera_poses, T_gripper2base_init, T_aruco2cam_init)
         # print(f"ee_base_pose:\n {ee_base_poses}")
@@ -444,6 +509,8 @@ class PandaGraspController(object):
         # for joint_target in self.scan_joints[1:]:
         #     self.pc.goto_joints(joint_target)
         i = 0
+        
+
         for pose in ee_base_poses[0:]:
             self.pc.goto_pose(pose)
             self.tsdf_server.T_cam_task = self.Ttarget2cam_list[i]

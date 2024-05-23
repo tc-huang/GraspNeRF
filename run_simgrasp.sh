@@ -2,6 +2,7 @@
 
 GPUID=0
 BLENDER_BIN=/home/rl/Documents/JH/newGraspNeRF/GraspNeRF/blender-2.93.3-linux-x64/blender
+BLENDER_BIN=/catkin_ws/GraspNeRF/blender-2.93.3-linux-x64/blender
 # BLENDER_BIN=/blender-2.93.3-linux-x64/blender
 
 RENDERER_ASSET_DIR=./data/assets
@@ -29,6 +30,10 @@ METHOD='graspnerf'
 
 mycount=0 
 while (( $mycount < $NUM_TRIALS )); do
+   # $BLENDER_BIN $BLENDER_PROJ_PATH --python scripts/sim_grasp.py \
+   # -- $mycount $GPUID $expname $scene $object_set $check_seen_scene $material_type \
+   # $RENDERER_ASSET_DIR $SIM_LOG_DIR 0 $render_frame_list $METHOD
+
    $BLENDER_BIN $BLENDER_PROJ_PATH --background --python scripts/sim_grasp.py \
    -- $mycount $GPUID $expname $scene $object_set $check_seen_scene $material_type \
    $RENDERER_ASSET_DIR $SIM_LOG_DIR 0 $render_frame_list $METHOD

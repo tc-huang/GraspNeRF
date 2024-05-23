@@ -261,8 +261,12 @@ def blender_render(renderer, quaternion_list, translation_list, path_scene, rend
     if output_modality_dict['IR'] or output_modality_dict['RGB']:
         if is_init:
             renderer.src_energy_for_rgb_render = bpy.data.worlds["World"].node_tree.nodes["Background"].inputs[1].default_value
-
+        
         for i in render_frame_list:  
+            if i in [2,6,10,14,18,22]:
+                with open(f'camera_pose_{i}.txt', 'w') as file:
+                    file.write(f"quaternion: {quaternion_list[i]}, translation: {translation_list[i]}, camera_fov: {camera_fov}")
+                print(f"quaternion: {quaternion_list[i]}, translation: {translation_list[i]}, camera_fov: {camera_fov}")
             renderer.setCamera(quaternion_list[i], translation_list[i], camera_fov, baseline_distance)
             renderer.setLighting()
 
@@ -300,7 +304,6 @@ def blender_render(renderer, quaternion_list, translation_list, path_scene, rend
                 save_path = ir_r_dir_path
                 save_name = str(i).zfill(4)
                 renderer.render(save_name, save_path)
-        
     # render normal map and depth map
     if output_modality_dict['Normal']:
         # set normal as material
