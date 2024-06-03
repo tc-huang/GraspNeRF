@@ -42,6 +42,7 @@ sudo docker compose -f docker/docker-compose-gui-nvidia.yml up
 sudo docker exec -it ros_docker /bin/bash
 roscore
 rosrun rviz rviz -d config/my_grasp.rviz
+sudo chmod 777 /dev/ttyUSB0
 
 
 # Start Realsense ROS node
@@ -54,3 +55,27 @@ Error response from daemon: failed to create task for container: failed to creat
 nvidia-container-cli: initialization error: load library failed: libnvidia-ml.so.1: cannot open shared object file: no such file or directory: unknown
 > sudo apt-get remove docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin 
 > sudo apt-get install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin 
+
+## 2F-85
+sudo docker exec -it ros_docker /bin/bash
+git clone https://github.com/ros-industrial/robotiq.git
+export PYTHON_EXECUTABLE=/opt/conda/envs/myenv/bin/python
+pip install empy==3.3.4 pymodbus==2.5.3
+rosdep update
+rosdep install --from-paths src --ignore-src -r -y
+rm -rf build devel
+rm -rf src/robotiq_modbus_rtu
+rm -rf src/robotiq_2f_gripper_control
+cp -r /catkin_ws/GraspNeRF/robotiq_2f_gripper_control /catkin_ws/src
+cp -r /catkin_ws/GraspNeRF/robotiq_modbus_rtu /catkin_ws/src
+catkin_make
+source devel/setup.bash
+chmod +x /catkin_ws/src/robotiq_2f_gripper_control/nodes/Robotiq2FGripperRtuNode.py
+chmod +x /catkin_ws/src/robotiq_2f_gripper_control/nodes/Robotiq2FGripperSimpleController.py
+chmod +x /catkin_ws/src/robotiq_2f_gripper_control/nodes/Robotiq2FGripperStatusListener.py
+chmod +x /catkin_ws/src/robotiq_2f_gripper_control/nodes/Robotiq2FGripperTcpNode.py
+
+source devel/setup.bash
+rosrun robotiq_2f_gripper_control nodes/Robotiq2FGripperRtuNode.py /dev/ttyUSB0
+source devel/setup.bash
+rosrun robotiq_2f_gripper_control Robotiq2FGripperSimpleController.py

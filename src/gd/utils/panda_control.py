@@ -31,6 +31,15 @@ PLACE_JOINT_CONFIGURE = [
     70995
 ]
 
+DROP_JOINT_CONFIGURE = [
+    -65871,
+    43163,
+    29053,
+    511,
+    -74122,
+    76055
+]
+
 class PandaCommander(object):
     def __init__(self):
         if not FAKE:
@@ -77,6 +86,16 @@ class PandaCommander(object):
             rospy.loginfo("[Robot] Move to initial pose by joint configure")
             self.moving = False
             rospy.loginfo("PandaCommander: Arrived home!")
+    
+    def drop(self):
+        if not FAKE:
+            self.moving = True
+            # self.r.move_to_neutral()
+            self.robot_arm.move_to_joint_config(DROP_JOINT_CONFIGURE, SPEED)
+            rospy.loginfo("[Robot] Move to drop position by joint configure")
+            self.gripper.on()
+            self.moving = False
+            rospy.loginfo("PandaCommander: Arrived drop position")
 
     def goto_joints(self, joints:list):
         if not FAKE:
@@ -121,9 +140,11 @@ class PandaCommander(object):
     
     def grasp(self, width=0.0, force=10.0):
         if not FAKE:
-            success = self.gripper.close()
+            pass
+            success = self.gripper.soft_close()
             rospy.sleep(3)
             # return self.r.exec_gripper_cmd(width, force=force)
+    
 
     def move_gripper(self, width):
         if not FAKE:
